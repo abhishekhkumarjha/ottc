@@ -15,7 +15,8 @@ const PORT = 3000;
 app.use(express.json());
 
 // Initialize SQLite database
-const db = new DatabaseSync(path.join(process.cwd(), "ottc.db"));
+const dbPath = process.env.DB_PATH || path.join(process.cwd(), "ottc.db");
+const db = new DatabaseSync(dbPath);
 
 // Create tables if they do not exist
 db.exec(`
