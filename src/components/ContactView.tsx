@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { 
   MapPin, Phone, Mail, Clock, Send, CheckCircle2, AlertCircle, MessageSquare
 } from "lucide-react";
-import { COURSES } from "../coursesData";
+import { COURSES, API_BASE } from "../coursesData";
 
 export default function ContactView() {
   const [formData, setFormData] = useState({
@@ -29,7 +29,7 @@ export default function ContactView() {
     setError(null);
 
     try {
-      const response = await fetch("/api/inquiries", {
+      const response = await fetch(API_BASE + "/api/inquiries", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"

@@ -5,7 +5,7 @@ import {
   Wrench, Sparkles, BookOpen, Clock, ArrowRight, Star,
   MessageSquare, CheckCircle2, X
 } from "lucide-react";
-import { COURSES } from "../coursesData";
+import { COURSES, API_BASE } from "../coursesData";
 import { Review } from "../types";
 
 interface HomeViewProps {
@@ -49,7 +49,7 @@ export default function HomeView({ setActiveTab, onSelectCourse, openChat }: Hom
 
   const fetchReviews = async () => {
     try {
-      const res = await fetch("/api/reviews");
+      const res = await fetch(API_BASE + "/api/reviews");
       if (res.ok) {
         const data = await res.json();
         setReviews(data);
@@ -70,7 +70,7 @@ export default function HomeView({ setActiveTab, onSelectCourse, openChat }: Hom
     setSubmittingReview(true);
     setReviewError(null);
     try {
-      const res = await fetch("/api/reviews", {
+      const res = await fetch(API_BASE + "/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(reviewForm)

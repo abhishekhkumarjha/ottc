@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { COURSES } from "../coursesData";
+import { COURSES, API_BASE } from "../coursesData";
 import { Course } from "../types";
 import { 
   Search, SlidersHorizontal, Clock, BookOpen, User, 
@@ -77,7 +77,7 @@ export default function CatalogView({ selectedCourseId, onSelectCourse }: Catalo
     setApplyError(null);
 
     try {
-      const res = await fetch("/api/inquiries", {
+      const res = await fetch(API_BASE + "/api/inquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(applyForm)

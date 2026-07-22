@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Inquiry, Review } from "../types";
-import { COURSES } from "../coursesData";
+import { COURSES, API_BASE } from "../coursesData";
 import { 
   Users, CheckCircle, Clock, Trash2, Mail, Phone, Calendar, 
   Search, ShieldCheck, Lock, AlertCircle, TrendingUp, Info,
@@ -43,7 +43,7 @@ export default function AdminPortal() {
         return;
       }
 
-      const res = await fetch("/api/inquiries", {
+      const res = await fetch(API_BASE + "/api/inquiries", {
         headers: {
           "Authorization": `Bearer ${token}`
         }
@@ -68,7 +68,7 @@ export default function AdminPortal() {
   const fetchReviews = async () => {
     setLoadingReviews(true);
     try {
-      const res = await fetch("/api/reviews");
+      const res = await fetch(API_BASE + "/api/reviews");
       if (!res.ok) throw new Error("Could not retrieve student reviews.");
       const data = await res.json();
       setReviews(data);
@@ -89,7 +89,7 @@ export default function AdminPortal() {
         return;
       }
 
-      const res = await fetch(`/api/reviews/${id}`, {
+      const res = await fetch(API_BASE + `/api/reviews/${id}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -118,7 +118,7 @@ export default function AdminPortal() {
         return;
       }
       try {
-        const res = await fetch("/api/admin/check-session", {
+        const res = await fetch(API_BASE + "/api/admin/check-session", {
           headers: {
             "Authorization": `Bearer ${token}`
           }
@@ -154,7 +154,7 @@ export default function AdminPortal() {
     setAuthError(null);
 
     try {
-      const res = await fetch("/api/admin/login", {
+      const res = await fetch(API_BASE + "/api/admin/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -182,7 +182,7 @@ export default function AdminPortal() {
     const token = localStorage.getItem("ottc_admin_token");
     if (token) {
       try {
-        await fetch("/api/admin/logout", {
+        await fetch(API_BASE + "/api/admin/logout", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${token}`
@@ -208,7 +208,7 @@ export default function AdminPortal() {
         return;
       }
 
-      const res = await fetch(`/api/inquiries/${id}`, {
+      const res = await fetch(API_BASE + `/api/inquiries/${id}`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json",
@@ -242,7 +242,7 @@ export default function AdminPortal() {
         return;
       }
 
-      const res = await fetch(`/api/inquiries/${id}`, {
+      const res = await fetch(API_BASE + `/api/inquiries/${id}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${token}`

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { MessageSquare, X, Send, Sparkles, AlertCircle, RefreshCw, User, Calendar, Check, GraduationCap } from "lucide-react";
 import { ChatMessage } from "../types";
-import { COURSES } from "../coursesData";
+import { COURSES, API_BASE } from "../coursesData";
 
 export default function ChatbotWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -62,7 +62,7 @@ export default function ChatbotWidget() {
         text: m.text
       }));
 
-      const response = await fetch("/api/chat", {
+      const response = await fetch(API_BASE + "/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -125,7 +125,7 @@ export default function ChatbotWidget() {
 
     setLeadSubmitting(true);
     try {
-      const res = await fetch("/api/inquiries", {
+      const res = await fetch(API_BASE + "/api/inquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(leadForm)

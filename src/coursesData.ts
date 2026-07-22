@@ -312,3 +312,5 @@ export const FAQS = [
     answer: "To finalize your admission at the OTTC office, please bring: 1) A copy of your citizenship ID or national identity card, 2) Two passport-sized photographs, 3) The basic admission fee, and 4) Your completed registration copy."
   }
 ];
+
+export const API_BASE = (import.meta.env.VITE_API_URL as string) || "";
