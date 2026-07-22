@@ -16,6 +16,13 @@ app.use(express.json());
 
 // Initialize SQLite database
 const dbPath = process.env.DB_PATH || path.join(process.cwd(), "ottc.db");
+
+// Ensure the parent directory of the database exists (required for Render custom paths)
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new DatabaseSync(dbPath);
 
 // Create tables if they do not exist
