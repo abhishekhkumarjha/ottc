@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom 3D Utilities */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+/* Glassmorphism System */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.glass-panel-dark {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Core Orbiting & Floating Keyframes */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(2deg);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(16, 185, 129, 0.45);
+    transform: scale(1.05);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+.animate-orbit-1 {
+  animation: orbit-1 25s linear infinite;
+}
+
+.animate-orbit-2 {
+  animation: orbit-2 30s linear infinite;
+}
+
+.animate-orbit-3 {
+  animation: orbit-3 35s linear infinite;
+}
+
+.animate-orbit-4 {
+  animation: orbit-4 40s linear infinite;
+}
+
+@keyframes orbit-1 {
+  0% { transform: rotate(0deg) translateX(90px) rotate(0deg); }
+  100% { transform: rotate(360deg) translateX(90px) rotate(-360deg); }
+}
+
+@keyframes orbit-2 {
+  0% { transform: rotate(90deg) translateX(125px) rotate(-90deg); }
+  100% { transform: rotate(450deg) translateX(125px) rotate(-450deg); }
+}
+
+@keyframes orbit-3 {
+  0% { transform: rotate(180deg) translateX(160px) rotate(-180deg); }
+  100% { transform: rotate(540deg) translateX(160px) rotate(-540deg); }
+}
+
+@keyframes orbit-4 {
+  0% { transform: rotate(270deg) translateX(195px) rotate(-270deg); }
+  100% { transform: rotate(630deg) translateX(195px) rotate(-630deg); }
+}

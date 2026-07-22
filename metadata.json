@@ -1,0 +1,6 @@
+{
+  "name": "Onida Technical Training Centre",
+  "description": "Modern technical training platform for OTTC Janakpur, Nepal featuring extensive course catalog, admissions registration, and a smart virtual admissions AI chatbot.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
