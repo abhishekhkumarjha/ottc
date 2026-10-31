@@ -333,6 +333,7 @@ export default function AdminPortal() {
                   type="text"
                   required
                   placeholder="Enter administrator username"
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-600 focus:border-rose-500/50 focus:outline-none transition-all duration-200"
@@ -343,6 +344,7 @@ export default function AdminPortal() {
                 <label className="text-[10px] font-semibold text-slate-400 tracking-wider uppercase pl-1">Password</label>
                 <input
                   type="password"
+                  autoComplete="current-password"
                   required
                   placeholder="Enter administrator password"
                   value={password}

@@ -1,12 +1,17 @@
-import React, { useState, useEffect } from "react";
-import { motion } from "motion/react";
-import { 
-  Award, ShieldCheck, Users, Briefcase, Zap, 
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { motion, AnimatePresence, useInView, animate, useScroll, useTransform } from "motion/react";
+import {
+  Award, ShieldCheck, Users, Briefcase, Zap,
   Wrench, Sparkles, BookOpen, Clock, ArrowRight, Star,
-  MessageSquare, CheckCircle2, X
+  MessageSquare, CheckCircle2, X, ChevronRight, GraduationCap, Bot
 } from "lucide-react";
 import { COURSES, API_BASE } from "../coursesData";
 import { Review } from "../types";
+import { useModal } from "../hooks";
+import TiltCard from "./TiltCard";
+
+// three.js is ~150 KB gzipped, so the 3D scene loads in its own chunk after first paint
+const Hero3D = lazy(() => import("./Hero3D"));
 
 interface HomeViewProps {
   setActiveTab: (tab: string) => void;
@@ -14,803 +19,842 @@ interface HomeViewProps {
   openChat: () => void;
 }
 
+// ─── CSS orbit fallback (shown while 3D loads, or if WebGL is unavailable) ──
+function OrbitFallback() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      {[180, 260, 340].map((size, i) => (
+        <div
+          key={size}
+          className="absolute rounded-full"
+          style={{
+            width: size,
+            height: size,
+            border: `1px dashed ${i === 1 ? "#a855f744" : "#00d4ff44"}`,
+            animation: `spin-${i === 1 ? "reverse" : "slow"} ${20 + i * 10}s linear infinite`,
+          }}
+        />
+      ))}
+      <div
+        className="w-28 h-28 rounded-full flex flex-col items-center justify-center"
+        style={{
+          background: "radial-gradient(circle, rgba(0,102,255,0.3) 0%, rgba(0,212,255,0.1) 60%, transparent 100%)",
+          border: "1px solid rgba(0, 212, 255, 0.5)",
+          boxShadow: "0 0 40px rgba(0,212,255,0.4), 0 0 80px rgba(0,212,255,0.15)",
+        }}
+      >
+        <GraduationCap className="h-10 w-10" style={{ color: "#00d4ff" }} />
+        <span className="text-[9px] font-display font-bold tracking-widest mt-1" style={{ color: "#00d4ff" }}>OTTC</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Number that counts up when scrolled into view ──────────────────────────
+function CountUp({ to, suffix = "", prefix = "" }: { to: number; suffix?: string; prefix?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-60px" });
+  useEffect(() => {
+    if (!inView || !ref.current) return;
+    const node = ref.current;
+    const controls = animate(0, to, {
+      duration: 1.6,
+      ease: [0.16, 1, 0.3, 1],
+      onUpdate: (v) => { node.textContent = prefix + Math.round(v).toLocaleString() + suffix; },
+    });
+    return () => controls.stop();
+  }, [inView, to, suffix, prefix]);
+  return <span ref={ref}>{prefix}0{suffix}</span>;
+}
+
+const categoriesList = [
+  { courseId: "electrician", title: "Electrician", desc: "House & industrial power wiring", icon: Zap, color: "#f59e0b", glow: "rgba(245,158,11,0.3)" },
+  { courseId: "mobile-repair", title: "Mobile Repairing", desc: "Diagnostics, micro-soldering, flashing", icon: Sparkles, color: "#818cf8", glow: "rgba(129,140,248,0.3)" },
+  { courseId: "electronics", title: "Electronics Repair", desc: "Inverters, UPS, SMPS & Smart TVs", icon: BookOpen, color: "#f43f5e", glow: "rgba(244,63,94,0.3)" },
+  { courseId: "plumber", title: "Plumbing", desc: "Sanitaryware & PPR fusion welding", icon: Wrench, color: "#22d3ee", glow: "rgba(34,211,238,0.3)" },
+  { courseId: "driving", title: "Vehicle Driving", desc: "Safety driving & engine maintenance", icon: Clock, color: "#34d399", glow: "rgba(52,211,153,0.3)" },
+  { courseId: "ac-refrigeration", title: "AC & Refrigeration", desc: "HVAC thermodynamics & gas charging", icon: ShieldCheck, color: "#38bdf8", glow: "rgba(56,189,248,0.3)" },
+  { courseId: "electrical-supervisor", title: "Electrical Supervisor", desc: "Construction estimation & safety audits", icon: Users, color: "#c084fc", glow: "rgba(192,132,252,0.3)" },
+  { courseId: "house-wiring", title: "House Wiring", desc: "Concealed residential layouts", icon: Award, color: "#fb923c", glow: "rgba(251,146,60,0.3)" },
+];
+
+const advantages = [
+  { title: "30+ Years Experience", desc: "Established in 2050 B.S., guiding generations of technicians.", icon: Award, color: "#f59e0b" },
+  { title: "Up to 95% Practical", desc: "Learn by working on real industrial setups in our labs.", icon: Wrench, color: "#22d3ee" },
+  { title: "Expert Trainers", desc: "Certified trade experts with extensive industry field experience.", icon: Users, color: "#818cf8" },
+  { title: "Affordable Fees", desc: "Flexible payment plans and competitive tuition for everyone.", icon: ShieldCheck, color: "#34d399" },
+  { title: "Job-Oriented", desc: "Syllabus aligned with technical job specs in Nepal & Gulf.", icon: Briefcase, color: "#f43f5e" },
+  { title: "Pro Equipment", desc: "Use the exact instruments and tools found on real job sites.", icon: Zap, color: "#fb923c" },
+  { title: "Certified Credentials", desc: "Earn vocational trade certification upon passing evaluations.", icon: Award, color: "#c084fc" },
+  { title: "Small Batch Sizes", desc: "Max 15 students per batch for personalized mentoring.", icon: Users, color: "#38bdf8" },
+];
+
+const maxPractical = Math.max(...COURSES.map((c) => c.practicalPercentage));
+const stats = [
+  { value: 30, suffix: "+", label: "Years Experience", sub: "Since 2050 B.S.", color: "#22d3ee", glow: "rgba(34,211,238,0.4)" },
+  { value: 5000, suffix: "+", label: "Graduates Trained", sub: "Employment Success", color: "#818cf8", glow: "rgba(129,140,248,0.4)" },
+  { value: COURSES.length, suffix: "", label: "Trade Courses", sub: "Practical Trades", color: "#f59e0b", glow: "rgba(245,158,11,0.4)" },
+  { value: maxPractical, suffix: "%", label: "Hands-on Training", sub: "Up to, in workshops", color: "#34d399", glow: "rgba(52,211,153,0.4)" },
+];
+
+const emptyReview = () => ({ name: "", rating: 5, courseId: COURSES[0]?.id || "electrician", batch: "", text: "" });
+
 export default function HomeView({ setActiveTab, onSelectCourse, openChat }: HomeViewProps) {
-  // Get 3 popular courses
   const popularCourses = COURSES.filter(c => c.popular).slice(0, 3);
+  const heroRef = useRef<HTMLElement>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
+  const handleUnsupported = useCallback(() => setWebglFailed(true), []);
 
-  // Mouse tracking state for 3D Hero Parallax
-  const [mouseCoords, setMouseCoords] = useState({ x: 0, y: 0 });
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const { clientX, clientY, currentTarget } = e;
-    const { left, top, width, height } = currentTarget.getBoundingClientRect();
-    const x = ((clientX - left) / width - 0.5) * 30; // Max tilt 30deg
-    const y = ((clientY - top) / height - 0.5) * 30;
-    setMouseCoords({ x, y });
-  };
-  const handleMouseLeave = () => {
-    setMouseCoords({ x: 0, y: 0 });
-  };
+  // Hero content drifts and fades slightly as you scroll past it
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const heroTextY = useTransform(scrollYProgress, [0, 1], [0, 80]);
+  const heroSceneY = useTransform(scrollYProgress, [0, 1], [0, 160]);
+  const heroOpacity = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
 
-  // Reviews & Feedback State
+  // Reviews
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(true);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewSuccess, setReviewSuccess] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewForm, setReviewForm] = useState(emptyReview);
 
-  const [reviewForm, setReviewForm] = useState({
-    name: "",
-    rating: 5,
-    courseId: COURSES[0]?.id || "electrician",
-    batch: "",
-    text: ""
-  });
+  const closeReviewModal = useCallback(() => {
+    setShowReviewModal(false);
+    setReviewSuccess(false);
+    setReviewError(null);
+  }, []);
+  useModal(showReviewModal, closeReviewModal);
 
   const fetchReviews = async () => {
     try {
       const res = await fetch(API_BASE + "/api/reviews");
-      if (res.ok) {
-        const data = await res.json();
-        setReviews(data);
-      }
-    } catch (e) {
-      console.error("Failed to load reviews:", e);
-    } finally {
-      setLoadingReviews(false);
-    }
+      if (res.ok) setReviews(await res.json());
+    } catch (e) { console.error(e); } finally { setLoadingReviews(false); }
   };
-
-  useEffect(() => {
-    fetchReviews();
-  }, []);
+  useEffect(() => { fetchReviews(); }, []);
 
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!reviewForm.name.trim() || !reviewForm.text.trim()) {
+      setReviewError("Please enter your name and review.");
+      return;
+    }
     setSubmittingReview(true);
     setReviewError(null);
     try {
       const res = await fetch(API_BASE + "/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reviewForm)
+        body: JSON.stringify(reviewForm),
       });
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Failed to submit review.");
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Could not submit your review. Please try again.");
       }
       setReviewSuccess(true);
-      setReviewForm({
-        name: "",
-        rating: 5,
-        courseId: COURSES[0]?.id || "electrician",
-        batch: "",
-        text: ""
-      });
-      fetchReviews(); // Refresh list
+      setReviewForm(emptyReview());
+      fetchReviews();
     } catch (err: any) {
-      setReviewError(err.message);
-    } finally {
-      setSubmittingReview(false);
-    }
+      setReviewError(err.message === "Failed to fetch" ? "Cannot reach the server. Please check your connection." : err.message);
+    } finally { setSubmittingReview(false); }
   };
 
-
-  // Training categories requested:
-  const categoriesList = [
-    { courseId: "electrician", title: "Electrician", desc: "House & industrial power wiring setups", icon: Zap, color: "from-amber-400 to-orange-500" },
-    { courseId: "mobile-repair", title: "Mobile Repairing", desc: "Diagnostics, micro-soldering, iOS/Android flashing", icon: Sparkles, color: "from-indigo-400 to-purple-500" },
-    { courseId: "electronics", title: "Electronics Repairing", desc: "Inverters, UPS systems, SMPS & Smart TVs", icon: BookOpen, color: "from-rose-400 to-red-500" },
-    { courseId: "plumber", title: "Professional Plumbing", desc: "Sanitaryware fittings, PPR fusion welding", icon: Wrench, color: "from-cyan-400 to-teal-500" },
-    { courseId: "driving", title: "Vehicle Driving & Maintenance", desc: "Safety road driving and engine maintenance", icon: Clock, color: "from-emerald-400 to-teal-500" },
-    { courseId: "ac-refrigeration", title: "AC & Refrigeration", desc: "Thermodynamic cycles, split AC gas charging", icon: ShieldCheck, color: "from-sky-400 to-indigo-500" },
-    { courseId: "electrical-supervisor", title: "Electrical Supervisor", desc: "Construction estimation & safety audits", icon: Users, color: "from-purple-400 to-pink-500" },
-    { courseId: "house-wiring", title: "Electrical House Wiring", desc: "Concealed residential layouts and conduits", icon: Award, color: "from-orange-400 to-amber-500" }
-  ];
-
-  const advantages = [
-    { title: "30+ Years of Experience", desc: "Established in 2050 B.S., guiding generations of technicians.", icon: Award },
-    { title: "80%-95% Practical Training", desc: "Learn by actively working on real industrial setups in labs.", icon: Wrench },
-    { title: "Experienced Trainers", desc: "Classes led by certified trade experts with extensive industry field time.", icon: Users },
-    { title: "Affordable Fees", desc: "Flexible payment plans and competitive tuition rates for everyone.", icon: ShieldCheck },
-    { title: "Job-Oriented Courses", desc: "Syllabus aligned strictly with technical job specifications in Nepal & Gulf.", icon: Briefcase },
-    { title: "Industry Standard Equipment", desc: "Gain familiarity with the exact instruments, drills, and tools used on sites.", icon: Zap },
-    { title: "Certificate After Completion", desc: "Earn vocational trade certification upon passing final trade evaluations.", icon: Award },
-    { title: "Small Batch Sizes", desc: "Limited intake per batch (max 15) to guarantee personal mentor guidance.", icon: Users },
-  ];
-
   return (
-    <div className="space-y-24 pb-20 relative overflow-hidden bg-slate-50/20 font-sans">
-      
-      {/* Background Floating Blobs */}
-      <div className="absolute top-1/4 left-1/10 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-2/3 right-1/10 w-[500px] h-[500px] bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
+    <div className="space-y-0 pb-20 relative overflow-hidden">
 
-      {/* 1. HERO SECTION */}
-      <section className="relative bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white py-16 lg:py-24 px-4 overflow-hidden rounded-b-[40px] shadow-2xl shadow-slate-950/20">
-        {/* Background Grid Pattern Overlay */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-20"></div>
-        
-        {/* Decorative Neon Blurs */}
-        <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none animate-pulse"></div>
+      {/* ── 1. HERO ─────────────────────────────────────────────────────── */}
+      <section
+        ref={heroRef}
+        className="relative min-h-[92vh] flex items-center py-20 px-4 overflow-hidden"
+        style={{
+          background: "radial-gradient(ellipse 80% 60% at 50% 0%, rgba(0,102,255,0.12) 0%, transparent 70%), radial-gradient(ellipse 60% 40% at 80% 60%, rgba(124,58,237,0.08) 0%, transparent 60%), #020408",
+        }}
+      >
+        {/* Perspective grid floor */}
+        <div className="hero-floor" aria-hidden="true" />
 
-        <div className="relative max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center px-4 sm:px-6 lg:px-8">
-          
-          {/* Hero Left Content */}
-          <div className="space-y-8 text-left max-w-2xl">
-            <motion.div 
-              initial={{ opacity: 0, y: 15 }}
+        {/* 3D scene: full-bleed backdrop on mobile, right half on desktop */}
+        <motion.div
+          style={{ y: heroSceneY, opacity: heroOpacity }}
+          className="absolute inset-0 lg:left-[45%] opacity-50 lg:opacity-100"
+        >
+          {webglFailed ? (
+            <OrbitFallback />
+          ) : (
+            <Suspense fallback={<OrbitFallback />}>
+              <Hero3D className="absolute inset-0" onUnsupported={handleUnsupported} />
+            </Suspense>
+          )}
+        </motion.div>
+
+        {/* Fade the scene into the text column for legibility */}
+        <div
+          className="absolute inset-0 pointer-events-none lg:hidden"
+          style={{ background: "linear-gradient(to bottom, rgba(2,4,8,0.2), rgba(2,4,8,0.75))" }}
+        />
+
+        <motion.div
+          style={{ y: heroTextY, opacity: heroOpacity }}
+          className="relative max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-16 items-center px-4 sm:px-6 lg:px-8"
+        >
+          {/* Left – Text Content */}
+          <div className="space-y-8 text-left">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="inline-flex items-center space-x-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-1.5 rounded-full text-xs font-mono shadow-inner shadow-emerald-500/5"
+              className="inline-flex items-center space-x-2 px-4 py-2 rounded-full font-mono text-xs"
+              style={{
+                background: "rgba(0, 212, 255, 0.08)",
+                border: "1px solid rgba(0, 212, 255, 0.3)",
+                color: "#00d4ff",
+              }}
             >
-              <Sparkles className="h-3.5 w-3.5 animate-pulse text-emerald-400" />
+              <Sparkles className="h-3.5 w-3.5" />
               <span>30+ Years of Vocational Excellence</span>
             </motion.div>
 
-            <motion.h1 
-              initial={{ opacity: 0, y: 20 }}
+            <motion.h1
+              initial={{ opacity: 0, y: 25 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="font-display font-extrabold text-4xl sm:text-5xl md:text-6xl tracking-tight leading-[1.1] text-slate-100"
+              transition={{ duration: 0.7, delay: 0.1 }}
+              className="font-display font-bold text-4xl sm:text-5xl md:text-6xl leading-[1.08] tracking-tight"
+              style={{ color: "#f1f5f9" }}
             >
-              Learn Practical Skills.<br />
-              <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent drop-shadow-sm">Build Your Career.</span>
+              Learn{" "}
+              <span className="text-gradient-cyan">Practical</span>
+              <br />
+              Skills.{" "}
+              <span className="text-gradient-violet">Build Your Career.</span>
             </motion.h1>
 
-            <motion.p 
+            <motion.p
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="font-sans text-sm sm:text-base text-slate-350 leading-relaxed max-w-xl"
+              style={{ color: "#a8b5c8", lineHeight: 1.8 }}
+              className="text-sm sm:text-base max-w-xl"
             >
-              Join Onida Technical Training Centre (OTTC) in Janakpurdham. Master high-demand technical trades through 85% to 95% hands-on laboratory training and lock in high-paying job opportunities in Nepal and the Gulf.
+              Join Onida Technical Training Centre (OTTC) in Janakpurdham. Master high-demand technical trades through
+              hands-on workshop training and get job-ready for careers in Nepal and the Gulf.
             </motion.p>
 
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3 }}
-              className="flex flex-wrap gap-4 pt-2"
+              className="flex flex-wrap gap-4"
             >
-              <button
+              <motion.button
                 onClick={() => setActiveTab("catalog")}
-                className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-bold px-8 py-3.5 rounded-xl text-xs tracking-wider uppercase transition-all shadow-lg shadow-emerald-500/20 active:scale-[0.98] cursor-pointer"
+                className="btn-solid-cyan px-8 py-3.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.97 }}
               >
+                <Zap className="h-4 w-4" />
                 Explore Courses
-              </button>
-              <button
-                onClick={() => {
-                  onSelectCourse("electrician"); // Default to electrician for immediate form
-                  setActiveTab("catalog");
-                }}
-                className="bg-slate-900/80 hover:bg-slate-800 border border-slate-700/60 text-slate-100 font-bold px-8 py-3.5 rounded-xl text-xs tracking-wider uppercase transition-all active:scale-[0.98] cursor-pointer"
+              </motion.button>
+              <motion.button
+                onClick={() => setActiveTab("contact")}
+                className="btn-neon-cyan px-8 py-3.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.97 }}
               >
                 Apply Online
-              </button>
-              <button
-                onClick={() => setActiveTab("contact")}
-                className="border border-slate-700 hover:bg-white/5 text-slate-300 font-medium px-6 py-3.5 rounded-xl text-xs transition-all cursor-pointer"
+                <ArrowRight className="h-3.5 w-3.5" />
+              </motion.button>
+              <motion.button
+                onClick={openChat}
+                className="px-6 py-3.5 rounded-xl text-xs font-mono font-semibold uppercase tracking-widest cursor-pointer transition-colors duration-300 flex items-center gap-2 hover:text-slate-200"
+                style={{ color: "#94a3b8", border: "1px solid rgba(255,255,255,0.12)" }}
+                whileTap={{ scale: 0.97 }}
               >
-                Find Us
-              </button>
+                <Bot className="h-4 w-4" />
+                Ask AI Counselor
+              </motion.button>
             </motion.div>
-          </div>
 
-          {/* Hero Right Content: 3D Interactive Parallax Orbital Scene */}
-          <div 
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            className="hidden lg:flex items-center justify-center relative perspective-1000 w-full h-[450px]"
-          >
+            {/* Trust row */}
             <motion.div
-              style={{
-                rotateX: -mouseCoords.y,
-                rotateY: mouseCoords.x,
-                transformStyle: "preserve-3d"
-              }}
-              transition={{ type: "spring", stiffness: 100, damping: 20 }}
-              className="w-[400px] h-[400px] relative flex items-center justify-center preserve-3d"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+              className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 font-mono text-[11px]"
+              style={{ color: "#7c8ba1" }}
             >
-              {/* Central Glowing Core Globe */}
-              <div 
-                className="absolute w-28 h-28 bg-emerald-500/15 border border-emerald-500/40 rounded-full flex flex-col items-center justify-center shadow-[0_0_60px_rgba(16,185,129,0.3)] animate-pulse preserve-3d"
-                style={{ transform: "translateZ(30px)" }}
-              >
-                <div className="bg-emerald-600/30 p-3 rounded-2xl border border-emerald-500/40 shadow-inner">
-                  <Award className="h-8 w-8 text-emerald-400" />
-                </div>
-                <span className="text-[10px] font-mono font-bold text-emerald-300 uppercase tracking-widest mt-2">OTTC</span>
-              </div>
-
-              {/* Orbiting Technical Nodes with GPU accelerated rotation keys */}
-              <motion.div
-                className="absolute w-15 h-15 bg-slate-900/90 border border-emerald-500/30 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:border-emerald-400 transition-colors preserve-3d animate-orbit-1 cursor-pointer"
-                style={{ transform: "translateZ(70px)" }}
-                whileHover={{ scale: 1.15, z: 90 }}
-              >
-                <Zap className="h-6 w-6 text-amber-400" title="Electrical Lab" />
-              </motion.div>
-
-              <motion.div
-                className="absolute w-15 h-15 bg-slate-900/90 border border-emerald-500/30 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:border-emerald-400 transition-colors preserve-3d animate-orbit-2 cursor-pointer"
-                style={{ transform: "translateZ(90px)" }}
-                whileHover={{ scale: 1.15, z: 110 }}
-              >
-                <Sparkles className="h-6 w-6 text-indigo-400" title="Mobile Servicing" />
-              </motion.div>
-
-              <motion.div
-                className="absolute w-15 h-15 bg-slate-900/90 border border-emerald-500/30 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:border-emerald-400 transition-colors preserve-3d animate-orbit-3 cursor-pointer"
-                style={{ transform: "translateZ(110px)" }}
-                whileHover={{ scale: 1.15, z: 130 }}
-              >
-                <Wrench className="h-6 w-6 text-blue-400" title="AC & Refrigeration" />
-              </motion.div>
-
-              <motion.div
-                className="absolute w-15 h-15 bg-slate-900/90 border border-emerald-500/30 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:border-emerald-400 transition-colors preserve-3d animate-orbit-4 cursor-pointer"
-                style={{ transform: "translateZ(50px)" }}
-                whileHover={{ scale: 1.15, z: 70 }}
-              >
-                <ShieldCheck className="h-6 w-6 text-emerald-400" title="Quality Supervisor" />
-              </motion.div>
-
-              {/* Orbital Path Guides in Perspective */}
-              <div 
-                className="absolute inset-0 border border-dashed border-emerald-500/10 rounded-full w-full h-full animate-[spin_40s_linear_infinite] preserve-3d pointer-events-none"
-                style={{ transform: "translateZ(-20px) rotateX(70deg)" }} 
-              />
-              <div 
-                className="absolute inset-0 border border-dashed border-teal-500/10 rounded-full w-[85%] h-[85%] left-[7.5%] top-[7.5%] animate-[spin_50s_linear_infinite_reverse] preserve-3d pointer-events-none"
-                style={{ transform: "translateZ(-40px) rotateX(60deg)" }} 
-              />
+              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" style={{ color: "#34d399" }} /> Govt. registered</span>
+              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" style={{ color: "#34d399" }} /> New batches monthly</span>
+              <span className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" style={{ color: "#34d399" }} /> Max 15 per batch</span>
             </motion.div>
           </div>
+        </motion.div>
 
-        </div>
+        {/* Scroll cue */}
+        <motion.div
+          style={{ opacity: heroOpacity }}
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 hidden sm:flex flex-col items-center gap-2 pointer-events-none"
+          aria-hidden="true"
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.3em]" style={{ color: "#64748b" }}>Scroll</span>
+          <div className="w-5 h-8 rounded-full border flex justify-center pt-1.5" style={{ borderColor: "rgba(148,163,184,0.3)" }}>
+            <motion.div
+              className="w-1 h-1.5 rounded-full"
+              style={{ background: "#00d4ff" }}
+              animate={{ y: [0, 10, 0], opacity: [1, 0.2, 1] }}
+              transition={{ duration: 1.8, repeat: Infinity }}
+            />
+          </div>
+        </motion.div>
       </section>
 
-      {/* 2. STATS SECTION (Interactive 3D Glass Cards) */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 relative z-20">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
-          {[
-            { value: "30+", label: "Years Experience", color: "from-emerald-500 to-teal-400", sub: "Since 2050 B.S." },
-            { value: "5000+", label: "Graduates Trained", color: "from-blue-500 to-indigo-400", sub: "Employment Success" },
-            { value: "10+", label: "Expert Courses", color: "from-amber-400 to-orange-500", sub: "Practical Trades" },
-            { value: "90%+", label: "Practical Training", color: "from-purple-500 to-rose-400", sub: "Hands-on Workshops" }
-          ].map((stat, i) => (
+      {/* ── 2. STATS ────────────────────────────────────────────────────── */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {stats.map((stat, i) => (
             <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-100px" }}
-              transition={{ type: "spring", stiffness: 100, damping: 15, delay: i * 0.1 }}
-              whileHover={{ y: -8, rotateX: 6, rotateY: -6, z: 15 }}
-              style={{ transformStyle: "preserve-3d" }}
-              className="bg-white/80 backdrop-blur-md border border-slate-100 rounded-3xl p-6 shadow-xl shadow-slate-100/40 hover:shadow-2xl hover:border-emerald-100/50 hover:bg-white transition-all cursor-pointer flex flex-col justify-center items-center preserve-3d"
+              key={stat.label}
+              initial={{ opacity: 0, y: 30, rotateX: -25 }}
+              whileInView={{ opacity: 1, y: 0, rotateX: 0 }}
+              viewport={{ once: true, margin: "-80px" }}
+              transition={{ duration: 0.6, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+              style={{ transformPerspective: 800 }}
             >
-              <div 
-                className={`font-display font-extrabold text-4xl sm:text-5xl bg-gradient-to-r ${stat.color} bg-clip-text text-transparent drop-shadow-sm`}
-                style={{ transform: "translateZ(25px)" }}
-              >
-                {stat.value}
-              </div>
-              <div 
-                className="text-xs font-bold text-slate-800 tracking-tight mt-2.5 font-display"
-                style={{ transform: "translateZ(15px)" }}
-              >
-                {stat.label}
-              </div>
-              <div 
-                className="text-[10px] font-mono text-slate-400 mt-1 uppercase tracking-wider"
-                style={{ transform: "translateZ(10px)" }}
-              >
-                {stat.sub}
-              </div>
+              <TiltCard max={8} className="glass-card rounded-2xl p-5 sm:p-6 text-center overflow-hidden corner-accent">
+                <div className="absolute inset-0 opacity-10 rounded-2xl" style={{ background: `radial-gradient(circle at 50% 0%, ${stat.color}, transparent 70%)` }} />
+                <div
+                  className="font-display font-bold text-3xl sm:text-5xl mb-2 relative"
+                  style={{ color: stat.color, textShadow: `0 0 24px ${stat.glow}`, transform: "translateZ(30px)" }}
+                >
+                  <CountUp to={stat.value} suffix={stat.suffix} />
+                </div>
+                <div className="font-semibold text-sm mb-1 relative" style={{ color: "#e2e8f0" }}>{stat.label}</div>
+                <div className="font-mono text-[10px] uppercase tracking-widest relative" style={{ color: "#7c8ba1" }}>{stat.sub}</div>
+              </TiltCard>
             </motion.div>
           ))}
         </div>
       </section>
 
-      {/* 3. WHY CHOOSE OTTC */}
-      <motion.section 
-        initial={{ opacity: 0, y: 40 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: "-100px" }}
-        transition={{ duration: 0.6 }}
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12 text-center"
-      >
-        <div className="space-y-3">
-          <span className="text-xs text-emerald-600 font-mono uppercase tracking-wider font-bold">Unrivaled Technical Pedagogy</span>
-          <h2 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900 tracking-tight">Why Choose OTTC Janakpur?</h2>
-          <p className="text-slate-500 max-w-2xl mx-auto text-xs sm:text-sm leading-relaxed">
-            Over three decades of vocational excellence. Our learning frameworks ensure job readiness from day one.
+      <div className="divider-neon mx-auto max-w-4xl" />
+
+      {/* ── 3. COURSES CATALOG PREVIEW ──────────────────────────────────── */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="text-center mb-12"
+        >
+          <span className="section-eyebrow" style={{ color: "#00d4ff" }}>Training Programs</span>
+          <h2 className="font-display font-bold text-3xl sm:text-4xl mt-3 mb-4" style={{ color: "#f1f5f9" }}>
+            Our Course Catalog
+          </h2>
+          <p className="text-sm max-w-2xl mx-auto" style={{ color: "#94a3b8" }}>
+            Industry-aligned vocational programs with extensive practical lab time, taught by certified experts.
           </p>
-        </div>
+        </motion.div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {advantages.map((adv, index) => {
-            const IconComponent = adv.icon;
-            return (
-              <motion.div 
-                key={index} 
-                initial={{ opacity: 0, scale: 0.95 }}
-                whileInView={{ opacity: 1, scale: 1 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: index * 0.05 }}
-                whileHover={{ y: -8, rotateX: 4, rotateY: 4 }}
-                className="bg-white border border-slate-100 p-6 rounded-3xl hover:shadow-2xl hover:border-emerald-100/50 hover:bg-slate-50/10 transition-all group duration-300 flex flex-col items-center justify-between text-center cursor-pointer"
-              >
-                <div className="space-y-4">
-                  <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl w-fit mx-auto group-hover:bg-gradient-to-br group-hover:from-emerald-500 group-hover:to-teal-500 group-hover:text-white transition-all duration-300 shadow-sm">
-                    <IconComponent className="h-5 w-5" />
-                  </div>
-                  <h3 className="font-display font-bold text-slate-900 text-sm sm:text-base leading-snug">{adv.title}</h3>
-                  <p className="font-sans text-xs text-slate-400 mt-2 leading-relaxed">{adv.desc}</p>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      </motion.section>
-
-      {/* 4. POPULAR COURSES */}
-      <motion.section 
-        initial={{ opacity: 0, y: 40 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: "-100px" }}
-        transition={{ duration: 0.6 }}
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12"
-      >
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6 border-b border-slate-100 pb-6">
-          <div className="space-y-3 text-left">
-            <span className="text-xs text-emerald-600 font-mono uppercase tracking-wider font-bold">Fast-Track Career Launch</span>
-            <h2 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900 tracking-tight">Our Popular Trade Programs</h2>
-            <p className="text-slate-400 text-xs font-sans">Learn trades that guarantee placement across international industrial pipelines.</p>
-          </div>
-          <button 
-            onClick={() => setActiveTab("catalog")}
-            className="flex items-center text-emerald-600 font-sans font-bold text-xs tracking-wider uppercase hover:text-emerald-700 transition-colors group shrink-0"
-          >
-            <span>View All Courses</span>
-            <ArrowRight className="h-4 w-4 ml-2 transition-transform group-hover:translate-x-1" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {popularCourses.map((course, i) => (
-            <motion.div 
-              key={course.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.5, delay: i * 0.15 }}
-              whileHover={{ y: -10 }}
-              className="bg-white rounded-[28px] border border-slate-100 overflow-hidden hover:shadow-2xl hover:border-emerald-100 transition-all flex flex-col group cursor-pointer"
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          {categoriesList.map((cat, i) => (
+            <motion.div
+              key={cat.courseId}
+              initial={{ opacity: 0, y: 30, rotateY: -20 }}
+              whileInView={{ opacity: 1, y: 0, rotateY: 0 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ duration: 0.55, delay: (i % 4) * 0.07, ease: [0.16, 1, 0.3, 1] }}
+              style={{ transformPerspective: 900 }}
             >
-              <div className="relative h-52 overflow-hidden">
-                <img 
-                  src={course.image} 
-                  alt={course.name} 
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-108"
-                  referrerPolicy="no-referrer"
+              <TiltCard
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectCourse(cat.courseId)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectCourse(cat.courseId); } }}
+                className="glass-card rounded-2xl p-5 text-left cursor-pointer overflow-hidden group focus-ring"
+              >
+                <div
+                  className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                  style={{ background: `radial-gradient(circle at 30% 30%, ${cat.glow}, transparent 60%)` }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent opacity-60"></div>
-                <div className="absolute top-4 right-4 bg-emerald-500 text-slate-950 font-mono font-extrabold text-[9px] uppercase px-3 py-1.5 rounded-lg shadow-md tracking-wider">
-                  Popular
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 relative"
+                  style={{
+                    background: `${cat.color}15`,
+                    border: `1px solid ${cat.color}30`,
+                    boxShadow: `0 0 15px ${cat.glow}`,
+                    transform: "translateZ(40px)",
+                  }}
+                >
+                  <cat.icon className="h-5 w-5 relative z-10" style={{ color: cat.color }} />
                 </div>
-                <div className="absolute bottom-4 left-4 bg-slate-950/80 backdrop-blur-md text-white font-mono text-[10px] uppercase font-semibold px-3 py-1 rounded-lg">
-                  {course.duration} Duration
+                <div className="font-display font-semibold text-xs sm:text-sm mb-1 relative" style={{ color: "#f1f5f9", transform: "translateZ(25px)" }}>
+                  {cat.title}
                 </div>
-              </div>
+                <div className="font-sans text-[11px] leading-relaxed relative" style={{ color: "#94a3b8", transform: "translateZ(15px)" }}>
+                  {cat.desc}
+                </div>
+                <ChevronRight
+                  className="absolute bottom-4 right-4 h-4 w-4 opacity-0 group-hover:opacity-100 transition-all duration-300 group-hover:translate-x-1"
+                  style={{ color: cat.color }}
+                />
+              </TiltCard>
+            </motion.div>
+          ))}
+        </div>
 
-              <div className="p-6 flex flex-col flex-grow space-y-4 text-left">
-                <div className="flex justify-between items-start gap-2">
-                  <h3 className="font-display font-extrabold text-lg text-slate-900 leading-tight">
-                    {course.name}
+        <motion.div
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          className="text-center mt-10"
+        >
+          <motion.button
+            onClick={() => setActiveTab("catalog")}
+            className="btn-neon-cyan px-8 py-3.5 rounded-xl text-xs inline-flex items-center gap-2 cursor-pointer"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            View All Courses
+            <ArrowRight className="h-4 w-4" />
+          </motion.button>
+        </motion.div>
+      </section>
+
+      <div className="divider-neon-purple mx-auto max-w-4xl" />
+
+      {/* ── 4. WHY OTTC ─────────────────────────────────────────────────── */}
+      <section
+        className="py-20 px-4 relative overflow-hidden"
+        style={{
+          background: "radial-gradient(ellipse 60% 50% at 50% 50%, rgba(124,58,237,0.06) 0%, transparent 70%), #050b12",
+        }}
+      >
+        <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-14"
+          >
+            <span className="section-eyebrow" style={{ color: "#a855f7" }}>Why Choose Us</span>
+            <h2 className="font-display font-bold text-3xl sm:text-4xl mt-3 mb-4" style={{ color: "#f1f5f9" }}>
+              The OTTC <span className="text-gradient-violet">Advantage</span>
+            </h2>
+          </motion.div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {advantages.map((adv, i) => (
+              <motion.div
+                key={adv.title}
+                initial={{ opacity: 0, y: 30, rotateX: 20 }}
+                whileInView={{ opacity: 1, y: 0, rotateX: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={{ duration: 0.55, delay: (i % 4) * 0.06, ease: [0.16, 1, 0.3, 1] }}
+                style={{ transformPerspective: 900 }}
+              >
+                <TiltCard max={7} className="glass-card rounded-2xl p-6 overflow-hidden group">
+                  <div
+                    className="absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl opacity-0 group-hover:opacity-30 transition-opacity duration-500"
+                    style={{ background: adv.color }}
+                  />
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+                    style={{ background: `${adv.color}15`, border: `1px solid ${adv.color}30`, transform: "translateZ(30px)" }}
+                  >
+                    <adv.icon className="h-5 w-5" style={{ color: adv.color }} />
+                  </div>
+                  <h3 className="font-display font-semibold text-sm mb-2" style={{ color: "#f1f5f9" }}>
+                    {adv.title}
                   </h3>
-                  <span className="font-mono text-emerald-600 font-extrabold text-xs bg-emerald-50 px-2.5 py-1 rounded-lg">
-                    Rs. {course.fee.toLocaleString()}
+                  <p className="text-xs leading-relaxed" style={{ color: "#94a3b8" }}>
+                    {adv.desc}
+                  </p>
+                </TiltCard>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="divider-neon mx-auto max-w-4xl" />
+
+      {/* ── 5. FEATURED COURSES ─────────────────────────────────────────── */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="text-center mb-12"
+        >
+          <span className="section-eyebrow" style={{ color: "#00d4ff" }}>Popular Programs</span>
+          <h2 className="font-display font-bold text-3xl sm:text-4xl mt-3" style={{ color: "#f1f5f9" }}>
+            Featured Courses
+          </h2>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {popularCourses.map((course, i) => (
+            <motion.div
+              key={course.id}
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <TiltCard
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectCourse(course.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectCourse(course.id); } }}
+                className="glass-card rounded-2xl overflow-hidden cursor-pointer group flex flex-col focus-ring"
+              >
+                <div className="relative h-44 overflow-hidden">
+                  <img
+                    src={course.image}
+                    alt={course.name}
+                    loading="lazy"
+                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    referrerPolicy="no-referrer"
+                    style={{ filter: "brightness(0.8) saturate(0.9)" }}
+                  />
+                  <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,22,40,1) 0%, transparent 60%)" }} />
+                  <span
+                    className="absolute top-3 left-3 font-mono text-[10px] uppercase tracking-widest px-2 py-1 rounded-md"
+                    style={{ background: "rgba(2,4,8,0.75)", border: "1px solid rgba(0,212,255,0.25)", color: "#7dd3fc", backdropFilter: "blur(6px)" }}
+                  >
+                    {course.duration}
                   </span>
                 </div>
 
-                <p className="font-sans text-xs text-slate-500 leading-relaxed flex-grow">
-                  {course.shortDescription}
-                </p>
+                <div className="p-6 pt-2 space-y-4 flex-grow flex flex-col">
+                  <h3 className="font-display font-bold text-base" style={{ color: "#f1f5f9", transform: "translateZ(20px)" }}>
+                    {course.name}
+                  </h3>
+                  <p className="text-xs leading-relaxed flex-grow" style={{ color: "#94a3b8" }}>
+                    {course.shortDescription}
+                  </p>
 
-                <div className="grid grid-cols-2 gap-3 text-[10px] font-mono text-slate-400 py-3 border-y border-slate-50">
-                  <div>
-                    <span className="block text-slate-500 font-semibold uppercase tracking-wider">Practical:</span>
-                    <span className="text-emerald-600 font-bold">{course.practicalPercentage}% Hands-On</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500 font-semibold uppercase tracking-wider">Level:</span>
-                    <span className="text-slate-600 font-bold">{course.level}</span>
+                  <div className="flex items-center justify-between pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span className="font-display font-bold text-sm" style={{ color: "#e2e8f0" }}>
+                      Rs. {course.fee.toLocaleString()}
+                    </span>
+                    <span className="font-mono text-[11px] flex items-center gap-1 transition-transform group-hover:translate-x-1" style={{ color: "#34d399" }}>
+                      View Details
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </span>
                   </div>
                 </div>
-
-                <div className="pt-2 flex space-x-2.5">
-                  <button
-                    onClick={() => onSelectCourse(course.id)}
-                    className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-100 font-bold text-xs py-3 rounded-xl text-center transition-colors cursor-pointer"
-                  >
-                    Details
-                  </button>
-                  <button
-                    onClick={() => {
-                      onSelectCourse(course.id);
-                      setActiveTab("catalog");
-                      setTimeout(() => {
-                        const btn = document.getElementById("catalog-apply-btn");
-                        if (btn) btn.click();
-                      }, 200);
-                    }}
-                    className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs py-3 rounded-xl text-center transition-colors shadow-md shadow-emerald-600/10 cursor-pointer"
-                  >
-                    Apply Now
-                  </button>
-                </div>
-              </div>
+              </TiltCard>
             </motion.div>
           ))}
         </div>
-      </motion.section>
+      </section>
 
-      {/* 5. TRAINING CATEGORIES */}
-      <motion.section 
-        initial={{ opacity: 0, y: 40 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: "-100px" }}
-        transition={{ duration: 0.6 }}
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
-      >
-        <div className="bg-slate-900 text-white py-16 px-6 sm:px-12 rounded-[40px] shadow-2xl relative overflow-hidden border border-slate-800">
-          {/* Animated Background blobs */}
-          <div className="absolute top-0 right-0 w-80 h-80 bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-80 h-80 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-          
-          <div className="space-y-12 relative z-10">
-            <div className="text-center space-y-3">
-              <span className="text-xs text-emerald-400 font-mono uppercase tracking-wider font-bold">Diverse Workshop Classes</span>
-              <h2 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-100 tracking-tight">Our Core Training Categories</h2>
-              <p className="text-slate-400 max-w-2xl mx-auto text-xs sm:text-sm leading-relaxed">
-                We cover key mechanical and technical trades required in residential building, automobile systems, electronics servicing, and heavy industrial sites.
-              </p>
-            </div>
+      <div className="divider-neon-purple mx-auto max-w-4xl" />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {categoriesList.map((cat, index) => {
-                const IconComponent = cat.icon;
-                return (
-                  <motion.div 
-                    key={index}
-                    whileHover={{ y: -5, scale: 1.02 }}
-                    className="bg-slate-950/60 backdrop-blur-md p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/30 hover:bg-slate-950/90 transition-all flex items-start space-x-4 group cursor-pointer text-left"
-                    onClick={() => {
-                      onSelectCourse(cat.courseId);
-                    }}
-                  >
-                    <div className={`bg-gradient-to-br ${cat.color} text-slate-950 p-3.5 rounded-xl shadow-md group-hover:rotate-12 transition-transform`}>
-                      <IconComponent className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-display font-bold text-slate-200 text-sm sm:text-base group-hover:text-emerald-400 transition-colors">
-                        {cat.title}
-                      </h3>
-                      <p className="font-sans text-xs text-slate-400 mt-1.5 leading-relaxed">
-                        {cat.desc}
-                      </p>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </motion.section>
-
-      {/* 6. STUDENT SUCCESS (TESTIMONIALS & REVIEWS) */}
-      <motion.section 
-        initial={{ opacity: 0, y: 40 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: "-100px" }}
-        transition={{ duration: 0.6 }}
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12"
-        id="reviews-section"
-      >
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-slate-100 pb-6">
-          <div className="space-y-3 text-left md:max-w-xl">
-            <span className="text-xs text-emerald-600 font-mono uppercase tracking-wider font-bold">Student Feedback</span>
-            <h2 className="font-display font-extrabold text-3xl sm:text-4xl text-slate-900 tracking-tight">Verified Student Reviews</h2>
-            <p className="text-slate-550 text-xs sm:text-sm">
-              Read real, unedited feedback from our alumni, or share your own technical training experience to help future students.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              setReviewSuccess(false);
-              setReviewError(null);
-              setShowReviewModal(true);
-            }}
-            className="flex items-center justify-center space-x-2 bg-slate-900 hover:bg-slate-950 text-white px-5 py-3 rounded-xl font-sans font-bold text-xs tracking-wider uppercase transition-all shadow-md shrink-0 self-start md:self-end cursor-pointer"
+      {/* ── 6. REVIEWS ──────────────────────────────────────────────────── */}
+      <section className="py-16 px-4 relative" style={{ background: "#050b12" }}>
+        <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="flex flex-col sm:flex-row items-center justify-between mb-12 gap-4"
           >
-            <MessageSquare className="h-4 w-4" />
-            <span>Write a Review</span>
-          </button>
-        </div>
-
-        {loadingReviews ? (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
-            <p className="text-slate-400 text-xs font-mono mt-3">Loading student reviews...</p>
-          </div>
-        ) : reviews.length === 0 ? (
-          <div className="bg-white border border-dashed border-slate-200 rounded-3xl py-14 text-center max-w-lg mx-auto space-y-4">
-            <p className="text-slate-450 font-sans text-xs">No student reviews have been posted yet.</p>
-            <button
+            <div className="text-center sm:text-left">
+              <span className="section-eyebrow" style={{ color: "#a855f7" }}>Student Testimonials</span>
+              <h2 className="font-display font-bold text-3xl sm:text-4xl mt-2" style={{ color: "#f1f5f9" }}>
+                Student Reviews
+              </h2>
+            </div>
+            <motion.button
               onClick={() => setShowReviewModal(true)}
-              className="text-emerald-600 font-sans font-bold text-xs hover:underline cursor-pointer"
+              className="btn-neon-purple px-6 py-3 rounded-xl text-xs flex items-center gap-2 cursor-pointer shrink-0"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
-              Be the first to share your feedback!
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {reviews.map((t, i) => {
-              const courseName = COURSES.find(c => c.id === t.courseId)?.name || t.courseId;
-              const initials = t.name ? t.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "OT";
-              
-              const colors = [
-                "bg-emerald-500 text-slate-950",
-                "bg-blue-500 text-white",
-                "bg-indigo-500 text-white",
-                "bg-amber-500 text-slate-950",
-                "bg-teal-500 text-slate-950",
-                "bg-purple-500 text-white"
-              ];
-              const colorIdx = (t.name || "").charCodeAt(0) % colors.length;
-              const avatarColor = colors[colorIdx];
- 
-              return (
-                <motion.div 
-                  key={t.id}
+              <MessageSquare className="h-4 w-4" />
+              Write a Review
+            </motion.button>
+          </motion.div>
+
+          {loadingReviews ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="glass-card rounded-2xl p-6 animate-pulse">
+                  <div className="h-4 rounded mb-3" style={{ background: "rgba(255,255,255,0.06)", width: "60%" }} />
+                  <div className="h-3 rounded mb-2" style={{ background: "rgba(255,255,255,0.04)", width: "100%" }} />
+                  <div className="h-3 rounded" style={{ background: "rgba(255,255,255,0.04)", width: "80%" }} />
+                </div>
+              ))}
+            </div>
+          ) : reviews.length === 0 ? (
+            <div className="text-center py-16">
+              <Star className="h-12 w-12 mx-auto mb-4 opacity-30" style={{ color: "#a855f7" }} />
+              <p className="font-mono text-sm" style={{ color: "#94a3b8" }}>No reviews yet. Be the first!</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {reviews.slice(0, 6).map((review, i) => (
+                <motion.div
+                  key={review.id}
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
-                  transition={{ duration: 0.4, delay: i * 0.1 }}
-                  whileHover={{ y: -5 }}
-                  className="bg-white p-6 border border-slate-100 rounded-3xl shadow-xl shadow-slate-150/20 hover:shadow-2xl hover:border-emerald-50 transition-all flex flex-col justify-between relative text-left cursor-pointer"
+                  transition={{ delay: (i % 3) * 0.08 }}
+                  whileHover={{ y: -4 }}
+                  className="glass-card rounded-2xl p-5 space-y-3 relative overflow-hidden flex flex-col"
                 >
-                  <div>
-                    {/* Star Rating */}
-                    <div className="flex space-x-1 text-amber-400 mb-4">
-                      {[...Array(5)].map((_, i) => (
-                        <Star key={i} className={`h-4 w-4 ${i < t.rating ? "fill-current text-amber-400" : "text-slate-200"}`} />
+                  <div className="flex items-center justify-between">
+                    <div className="flex" aria-label={`${review.rating} out of 5 stars`}>
+                      {[...Array(5)].map((_, s) => (
+                        <Star
+                          key={s}
+                          className="h-3.5 w-3.5"
+                          style={{
+                            color: s < review.rating ? "#f59e0b" : "#334155",
+                            fill: s < review.rating ? "#f59e0b" : "transparent",
+                          }}
+                        />
                       ))}
                     </div>
- 
-                    {/* Quote text */}
-                    <p className="font-sans text-xs sm:text-sm italic text-slate-650 leading-relaxed mb-6">
-                      "{t.text}"
-                    </p>
+                    <span className="font-mono text-[10px]" style={{ color: "#64748b" }}>
+                      {new Date(review.createdAt).toLocaleDateString()}
+                    </span>
                   </div>
- 
-                  {/* Student Bio */}
-                  <div className="flex items-center space-x-3.5 pt-4 border-t border-slate-50 mt-auto">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-xs ${avatarColor} shrink-0`}>
-                      {initials}
-                    </div>
-                    <div className="text-left">
-                      <h4 className="font-display font-bold text-slate-900 text-sm leading-none">{t.name}</h4>
-                      <span className="text-[10px] font-mono text-emerald-600 font-bold mt-1.5 block">
-                        {courseName}
-                      </span>
-                      <span className="text-[9px] font-mono text-slate-400 block mt-0.5">
-                        Batch {t.batch || "Recent"} • {new Date(t.createdAt).toLocaleDateString(undefined, {month: "short", year: "numeric"})}
-                      </span>
-                    </div>
+                  <p className="text-xs leading-relaxed flex-grow" style={{ color: "#a8b5c8" }}>
+                    "{review.text}"
+                  </p>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} className="pt-3">
+                    <p className="font-display font-semibold text-xs" style={{ color: "#f1f5f9" }}>{review.name}</p>
+                    <p className="font-mono text-[10px] mt-0.5" style={{ color: "#7c8ba1" }}>
+                      {COURSES.find(c => c.id === review.courseId)?.name || review.courseId}
+                      {review.batch ? ` · ${review.batch}` : ""}
+                    </p>
                   </div>
                 </motion.div>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
-        {/* 6B. WRITE A REVIEW MODAL */}
-        {showReviewModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
-              
-              {/* Modal Header */}
-              <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white p-6 flex justify-between items-center">
-                <div className="space-y-1 text-left">
-                  <h3 className="font-display font-extrabold text-lg leading-none">Write a Student Review</h3>
-                  <p className="text-[10px] text-emerald-100 font-sans">Share your training feedback & rating with our community</p>
-                </div>
-                <button 
-                  onClick={() => setShowReviewModal(false)}
-                  className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-all cursor-pointer"
+      {/* ── 7. CTA SECTION ──────────────────────────────────────────────── */}
+      <section className="py-20 px-4 relative overflow-hidden">
+        <motion.div
+          initial={{ opacity: 0, rotateX: 25, y: 40 }}
+          whileInView={{ opacity: 1, rotateX: 0, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          style={{ transformPerspective: 1200 }}
+          className="max-w-4xl mx-auto"
+        >
+          <div
+            className="rounded-3xl p-8 sm:p-12 text-center relative overflow-hidden corner-accent"
+            style={{
+              background: "radial-gradient(ellipse 80% 60% at 50% 50%, rgba(0,102,255,0.14) 0%, rgba(124,58,237,0.08) 50%, rgba(10,22,40,0.9) 100%)",
+              border: "1px solid rgba(0,212,255,0.18)",
+              boxShadow: "0 0 80px rgba(0,102,255,0.1), 0 0 40px rgba(124,58,237,0.05)",
+            }}
+          >
+            <div className="absolute inset-0 cyber-grid opacity-30 rounded-3xl" />
+            <div className="relative space-y-6">
+              <span className="section-eyebrow" style={{ color: "#00d4ff" }}>Start Your Journey Today</span>
+              <h2 className="font-display font-bold text-3xl sm:text-4xl" style={{ color: "#f1f5f9" }}>
+                Ready to <span className="text-gradient-cyan">Transform</span> Your Future?
+              </h2>
+              <p className="text-sm max-w-xl mx-auto" style={{ color: "#94a3b8" }}>
+                Enroll in one of Nepal's most trusted vocational training centres. New batches start every month.
+              </p>
+              <div className="flex flex-wrap gap-4 justify-center pt-2">
+                <motion.button
+                  onClick={() => setActiveTab("catalog")}
+                  className="btn-solid-cyan px-8 py-3.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                 >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div className="p-6 overflow-y-auto flex-1">
-                {reviewSuccess ? (
-                  <div className="text-center py-8 space-y-4">
-                    <div className="inline-flex items-center justify-center bg-emerald-50 text-emerald-500 p-3.5 rounded-full animate-bounce">
-                      <CheckCircle2 className="h-10 w-10" />
-                    </div>
-                    <h4 className="font-display font-bold text-lg text-slate-900">Review Submitted Successfully!</h4>
-                    <p className="font-sans text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-                      Thank you for sharing your valuable training experience. Your review is now live on our platform and community board!
-                    </p>
-                    <button
-                      onClick={() => {
-                        setShowReviewModal(false);
-                        setReviewSuccess(false);
-                      }}
-                      className="bg-slate-900 hover:bg-slate-950 text-white font-sans font-bold text-xs px-6 py-2.5 rounded-xl transition-all cursor-pointer"
-                    >
-                      Close Window
-                    </button>
-                  </div>
-                ) : (
-                  <form onSubmit={handleSubmitReview} className="space-y-4 text-left">
-                    {reviewError && (
-                      <div className="bg-red-50 border border-red-100 text-red-700 text-xs px-4 py-2.5 rounded-xl flex items-center space-x-2">
-                        <span className="font-medium">{reviewError}</span>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Name input */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider pl-1">Your Full Name *</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. Sanjay Kumar Shah"
-                          value={reviewForm.name}
-                          onChange={(e) => setReviewForm({ ...reviewForm, name: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
-                        />
-                      </div>
-
-                      {/* Batch input */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider pl-1">Batch Year / Info *</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. 2080 B.S."
-                          value={reviewForm.batch}
-                          onChange={(e) => setReviewForm({ ...reviewForm, batch: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Course Selection */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider pl-1">Your Trade Course *</label>
-                        <select
-                          required
-                          value={reviewForm.courseId}
-                          onChange={(e) => setReviewForm({ ...reviewForm, courseId: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-sans"
-                        >
-                          {COURSES.map((course) => (
-                            <option key={course.id} value={course.id}>
-                              {course.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Interactive Rating Selection */}
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider pl-1">Rating (1 to 5 Stars) *</label>
-                        <div className="flex items-center space-x-1.5 h-[42px] pl-1">
-                          {[1, 2, 3, 4, 5].map((star) => (
-                            <button
-                              key={star}
-                              type="button"
-                              onClick={() => setReviewForm({ ...reviewForm, rating: star })}
-                              className="text-amber-400 hover:scale-110 transition-transform focus:outline-none cursor-pointer"
-                            >
-                              <Star 
-                                className={`h-6 w-6 ${star <= reviewForm.rating ? "fill-current text-amber-400" : "text-slate-350"}`} 
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Feedback Textarea */}
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-wider pl-1">Your Review / Experience *</label>
-                      <textarea
-                        required
-                        rows={4}
-                        placeholder="Tell us about the practical workshops, trainers, lab facilities, and how this vocational training helped you..."
-                        value={reviewForm.text}
-                        onChange={(e) => setReviewForm({ ...reviewForm, text: e.target.value })}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all leading-relaxed"
-                      />
-                    </div>
-
-                    {/* Submit Button */}
-                    <div className="pt-3 flex justify-end space-x-3">
-                      <button
-                        type="button"
-                        onClick={() => setShowReviewModal(false)}
-                        className="bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-100 font-bold text-xs px-5 py-3 rounded-xl transition-all cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={submittingReview}
-                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs px-6 py-3 rounded-xl transition-all flex items-center space-x-2 cursor-pointer shadow-md"
-                      >
-                        {submittingReview ? (
-                          <>
-                            <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent"></div>
-                            <span>Submitting...</span>
-                          </>
-                        ) : (
-                          <span>Submit My Review</span>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                )}
+                  <Zap className="h-4 w-4" />
+                  Explore Courses
+                </motion.button>
+                <motion.button
+                  onClick={() => setActiveTab("contact")}
+                  className="btn-neon-cyan px-8 py-3.5 rounded-xl text-xs flex items-center gap-2 cursor-pointer"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Contact Us
+                  <ArrowRight className="h-4 w-4" />
+                </motion.button>
               </div>
             </div>
           </div>
+        </motion.div>
+      </section>
+
+      {/* ── REVIEW MODAL ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showReviewModal && (
+          <motion.div
+            key="review-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 overflow-y-auto"
+            style={{ background: "rgba(2,4,8,0.8)", backdropFilter: "blur(8px)" }}
+            onClick={closeReviewModal}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="review-modal-title"
+              initial={{ opacity: 0, scale: 0.9, y: 20, rotateX: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0, rotateX: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", stiffness: 260, damping: 24 }}
+              className="w-full max-w-lg rounded-2xl p-6 sm:p-8 relative my-auto"
+              style={{
+                background: "rgba(10,22,40,0.98)",
+                border: "1px solid rgba(168,85,247,0.3)",
+                boxShadow: "0 0 40px rgba(168,85,247,0.2)",
+                transformPerspective: 1000,
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <button
+                onClick={closeReviewModal}
+                aria-label="Close"
+                className="absolute top-4 right-4 p-1.5 rounded-lg cursor-pointer transition-colors hover:text-slate-200"
+                style={{ color: "#94a3b8", background: "rgba(255,255,255,0.05)" }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              {reviewSuccess ? (
+                <div className="text-center py-8 space-y-4">
+                  <CheckCircle2 className="h-16 w-16 mx-auto" style={{ color: "#34d399", filter: "drop-shadow(0 0 15px rgba(52,211,153,0.6))" }} />
+                  <h3 className="font-display font-bold text-xl" style={{ color: "#34d399" }}>Review Submitted!</h3>
+                  <p className="text-sm" style={{ color: "#94a3b8" }}>Thank you for sharing your experience.</p>
+                  <button onClick={closeReviewModal} className="btn-neon-cyan px-6 py-2.5 rounded-xl text-xs cursor-pointer">
+                    Close
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmitReview} className="space-y-5">
+                  <div>
+                    <h3 id="review-modal-title" className="font-display font-bold text-xl mb-1" style={{ color: "#f1f5f9" }}>Write a Review</h3>
+                    <p className="text-xs" style={{ color: "#94a3b8" }}>Share your learning experience at OTTC</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="rv-name" className="field-label">Name *</label>
+                      <input
+                        id="rv-name"
+                        type="text"
+                        required
+                        maxLength={80}
+                        className="w-full input-dark px-3 py-2.5 rounded-lg text-sm"
+                        value={reviewForm.name}
+                        onChange={e => setReviewForm(f => ({ ...f, name: e.target.value }))}
+                        placeholder="Your name"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="rv-batch" className="field-label">Batch Year</label>
+                      <input
+                        id="rv-batch"
+                        type="text"
+                        maxLength={30}
+                        className="w-full input-dark px-3 py-2.5 rounded-lg text-sm"
+                        value={reviewForm.batch}
+                        onChange={e => setReviewForm(f => ({ ...f, batch: e.target.value }))}
+                        placeholder="e.g. 2081 B.S."
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="rv-course" className="field-label">Course</label>
+                    <select
+                      id="rv-course"
+                      className="w-full input-dark px-3 py-2.5 rounded-lg text-sm"
+                      value={reviewForm.courseId}
+                      onChange={e => setReviewForm(f => ({ ...f, courseId: e.target.value }))}
+                    >
+                      {COURSES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <span className="field-label">Rating</span>
+                    <div className="flex gap-2" role="radiogroup" aria-label="Rating">
+                      {[1, 2, 3, 4, 5].map(n => (
+                        <button
+                          key={n}
+                          type="button"
+                          role="radio"
+                          aria-checked={reviewForm.rating === n}
+                          aria-label={`${n} star${n > 1 ? "s" : ""}`}
+                          onClick={() => setReviewForm(f => ({ ...f, rating: n }))}
+                          className="cursor-pointer transition-transform hover:scale-110"
+                        >
+                          <Star
+                            className="h-7 w-7"
+                            style={{
+                              color: n <= reviewForm.rating ? "#f59e0b" : "#334155",
+                              fill: n <= reviewForm.rating ? "#f59e0b" : "transparent",
+                            }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="rv-text" className="field-label">Your Review *</label>
+                    <textarea
+                      id="rv-text"
+                      required
+                      rows={4}
+                      maxLength={1000}
+                      className="w-full input-dark px-3 py-2.5 rounded-lg text-sm resize-none"
+                      value={reviewForm.text}
+                      onChange={e => setReviewForm(f => ({ ...f, text: e.target.value }))}
+                      placeholder="Share your experience..."
+                    />
+                  </div>
+
+                  {reviewError && (
+                    <div role="alert" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs" style={{ background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.3)", color: "#fb7185" }}>
+                      <X className="h-4 w-4 shrink-0" />
+                      {reviewError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={submittingReview}
+                    className="w-full btn-solid-cyan py-3 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submittingReview ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4" />
+                        Submit Review
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+            </motion.div>
+          </motion.div>
         )}
-      </motion.section>
-
-
-      {/* 7. CTA BANNER */}
-      <motion.section 
-        initial={{ opacity: 0, scale: 0.98 }}
-        whileInView={{ opacity: 1, scale: 1 }}
-        viewport={{ once: true }}
-        transition={{ duration: 0.5 }}
-        className="max-w-5xl mx-auto px-4"
-      >
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 rounded-[36px] p-8 md:p-12 text-white text-center space-y-6 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-60 h-60 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-          
-          <h2 className="font-display font-extrabold text-2xl md:text-3xl tracking-tight max-w-2xl mx-auto leading-tight">
-            Ready to Master Practical Tech Skills & Secure Your Career?
-          </h2>
-          <p className="font-sans text-xs sm:text-sm text-slate-300 max-w-xl mx-auto leading-relaxed">
-            New training batches start on the 1st of every month. Register your enrollment inquiry today. No prior academic background required.
-          </p>
-          <div className="flex flex-col sm:flex-row justify-center items-center gap-4 pt-2">
-            <button
-              onClick={() => setActiveTab("catalog")}
-              className="w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-bold px-8 py-4 rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/10 cursor-pointer active:scale-[0.98]"
-            >
-              Apply Online Now
-            </button>
-            <button
-              onClick={openChat}
-              className="w-full sm:w-auto bg-slate-800/80 border border-slate-700/60 hover:bg-slate-700 text-white font-bold px-8 py-4 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer active:scale-[0.98]"
-            >
-              Chat with Admissions Bot
-            </button>
-          </div>
-        </div>
-      </motion.section>
+      </AnimatePresence>
     </div>
   );
 }

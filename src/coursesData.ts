@@ -275,17 +275,6 @@ export const COURSES: Course[] = [
   }
 ];
 
-export const GALLERY_ITEMS = [
-  { id: "g1", category: "Electrical Lab", title: "Students installing house wiring board", image: "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&q=80&w=600" },
-  { id: "g2", category: "Mobile Repair", title: "Micro-soldering under microscope", image: "https://images.unsplash.com/photo-1601524909162-be87252be298?auto=format&fit=crop&q=80&w=600" },
-  { id: "g3", category: "Electronics Lab", title: "SMPS circuit board troubleshooting", image: "https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&q=80&w=600" },
-  { id: "g4", category: "AC Workshop", title: "Split AC installation practice", image: "https://images.unsplash.com/photo-1621905252507-b354bc25eeac?auto=format&fit=crop&q=80&w=600" },
-  { id: "g5", category: "Plumbing", title: "PPR hot fusion pipe welding", image: "https://images.unsplash.com/photo-1607472586893-edb57bdc0e39?auto=format&fit=crop&q=80&w=600" },
-  { id: "g6", category: "Student Activities", title: "Safety induction batch group", image: "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&q=80&w=600" },
-  { id: "g7", category: "Electrical Lab", title: "Motor winding practical room", image: "https://images.unsplash.com/photo-1498084393753-b411b2d26b34?auto=format&fit=crop&q=80&w=600" },
-  { id: "g8", category: "Student Activities", title: "Certificate distribution ceremony", image: "https://images.unsplash.com/photo-1531482615713-2afd69097998?auto=format&fit=crop&q=80&w=600" }
-];
-
 export const FAQS = [
   {
     question: "How do I apply for a course?",
