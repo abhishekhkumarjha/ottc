@@ -10,9 +10,22 @@ import crypto from "crypto";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
+
+// Trim a client-supplied value to a bounded string ("" if missing or not a string)
+function cleanStr(value: unknown, max: number): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function isValidPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return /^[+\d][\d\s\-()]*$/.test(phone) && digits.length >= 7 && digits.length <= 15;
+}
+
+const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`;
+const INQUIRY_STATUSES = ["Pending", "Contacted", "Completed"];
 
 // Enable CORS for cross-origin frontend hosting (e.g. Vercel)
 app.use((req, res, next) => {
@@ -191,18 +204,20 @@ function seedAdmin() {
   if (countRow.cnt === 0) {
     const adminId = "admin_" + Date.now().toString(36);
     const username = "admin";
-    const password = "ottc123";
+    const password = process.env.ADMIN_PASSWORD || "ottc123";
     const hash = crypto.createHash("sha256").update(password).digest("hex");
     db.prepare(`
       INSERT INTO admins (id, username, passwordHash, createdAt)
       VALUES (?, ?, ?, ?)
     `).run(adminId, username, hash, new Date().toISOString());
-    console.log(`[Database Seeding] Admin account created. Username: ${username}, Password: ${password}`);
+    console.log(`[Database Seeding] Admin account created. Username: ${username}` +
+      (process.env.ADMIN_PASSWORD ? " (password from ADMIN_PASSWORD)" : ", Password: ottc123 — set ADMIN_PASSWORD to change it"));
   }
 }
 
 migrateData();
 seedAdmin();
+db.prepare("DELETE FROM sessions WHERE expiresAt < ?").run(new Date().toISOString());
 
 // Admin Authentication Middleware
 function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -358,8 +373,9 @@ REQUIRED DOCUMENTS:
 LOCATION & CONTACT:
 - Address: Janakpurdham-8, near Murali Chowk, on the road toward Vishwakarma Chowk, Dhanusha, Nepal.
 - Opening Hours: Sunday to Friday, 6:00 AM - 6:00 PM. (Closed on Saturdays).
-- Phone: +977-41-523123, +977-9854023456 (Mobile & WhatsApp support)
-- Email: admissions@onidatechnical.edu.np
+- Phone: +977-9804853916 (Primary Mobile)
+- WhatsApp: +977-9844135708
+- Email: mrshailenderakumarjha@gmail.com
 
 CHATBOT INSTRUCTIONS:
 1. Be warm, polite, professional, and clear. Speak with authority as OTTC's counselor.
@@ -433,18 +449,30 @@ app.get("/api/inquiries", requireAdminAuth, (req, res) => {
 });
 
 app.post("/api/inquiries", (req, res) => {
-  const { name, phone, email, courseId, contactTime, message } = req.body;
-  
+  const body = req.body || {};
+  const name = cleanStr(body.name, 80);
+  const phone = cleanStr(body.phone, 20);
+  const email = cleanStr(body.email, 120);
+  const courseId = cleanStr(body.courseId, 60);
+  const contactTime = cleanStr(body.contactTime, 60);
+  const message = cleanStr(body.message, 1000);
+
   if (!name || !phone || !courseId) {
     return res.status(400).json({ error: "Name, phone, and course selection are required fields." });
+  }
+  if (!isValidPhone(phone)) {
+    return res.status(400).json({ error: "Please enter a valid phone number." });
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "Please enter a valid email address." });
   }
 
   try {
     const newInquiry = {
-      id: "inq_" + Date.now().toString(36),
+      id: newId("inq"),
       name,
       phone,
-      email: email || "",
+      email,
       courseId,
       contactTime: contactTime || "Anytime",
       message: message || "No extra message provided.",
@@ -477,8 +505,8 @@ app.put("/api/inquiries/:id", requireAdminAuth, (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!status) {
-    return res.status(400).json({ error: "Status value is required." });
+  if (!INQUIRY_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `Status must be one of: ${INQUIRY_STATUSES.join(", ")}.` });
   }
 
   try {
@@ -523,20 +551,25 @@ app.get("/api/reviews", (req, res) => {
 });
 
 app.post("/api/reviews", (req, res) => {
-  const { name, rating, text, courseId, batch } = req.body;
+  const body = req.body || {};
+  const name = cleanStr(body.name, 80);
+  const text = cleanStr(body.text, 1000);
+  const courseId = cleanStr(body.courseId, 60);
+  const batch = cleanStr(body.batch, 30);
+  const rating = body.rating;
 
   if (!name || !rating || !text || !courseId) {
     return res.status(400).json({ error: "Name, rating, course selection, and review text are required fields." });
   }
 
   const numericRating = Number(rating);
-  if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+  if (!Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
     return res.status(400).json({ error: "Rating must be a number between 1 and 5." });
   }
 
   try {
     const newReview = {
-      id: "rev_" + Date.now().toString(36),
+      id: newId("rev"),
       name,
       courseId,
       rating: numericRating,
@@ -583,7 +616,8 @@ app.delete("/api/reviews/:id", requireAdminAuth, (req, res) => {
 
 // API: Chatbot AI Router
 app.post("/api/chat", async (req, res) => {
-  const { message, history } = req.body;
+  const message = cleanStr(req.body?.message, 1000);
+  const history = Array.isArray(req.body?.history) ? req.body.history.slice(-10) : [];
 
   if (!message) {
     return res.status(400).json({ error: "Message is required." });
@@ -600,12 +634,14 @@ app.post("/api/chat", async (req, res) => {
   try {
     // Format conversation history for Gemini API
     // Gemini 3.5-flash format expects string contents or structured conversation context.
-    const formattedHistory = (history || []).map((msg: any) => {
-      return {
+    const formattedHistory = history
+      .filter((msg: any) => msg && typeof msg.text === "string" && msg.text.trim())
+      .map((msg: any) => ({
         role: msg.sender === "user" ? "user" : "model",
-        parts: [{ text: msg.text }]
-      };
-    });
+        parts: [{ text: msg.text.slice(0, 2000) }]
+      }));
+    // Gemini expects the conversation to open with a user turn
+    while (formattedHistory.length && formattedHistory[0].role !== "user") formattedHistory.shift();
 
     // Add current user message
     formattedHistory.push({
@@ -654,13 +690,13 @@ function getFallbackResponse(message: string): string {
 *Please note: Each course has a small additional admission fee ranging from Rs. 1,000 to Rs. 2,500.* You can fill the inquiry form right here to enroll!`;
   }
   if (msg.includes("where") || msg.includes("location") || msg.includes("locate") || msg.includes("address") || msg.includes("map")) {
-    return `We are conveniently located in **Janakpurdham-8, near Murali Chowk**, on the road leading towards Vishwakarma Chowk, Dhanusha, Nepal. You can visit us Sunday to Friday, from 6:00 AM to 6:00 PM. We are closed on Saturdays. Call us at +977-41-523123 or WhatsApp +977-9854023456!`;
+    return `We are conveniently located in **Janakpurdham-8, near Murali Chowk**, on the road leading towards Vishwakarma Chowk, Dhanusha, Nepal. You can visit us Sunday to Friday, from 6:00 AM to 6:00 PM. We are closed on Saturdays. Call us at +977-9804853916 or WhatsApp +977-9844135708!`;
   }
   if (msg.includes("phone") || msg.includes("contact") || msg.includes("call") || msg.includes("number") || msg.includes("whatsapp")) {
     return `You can reach Onida Technical Training Centre (OTTC) via:
-- **Phone**: +977-41-523123
-- **Mobile/WhatsApp**: +977-9854023456
-- **Email**: admissions@onidatechnical.edu.np
+- **Phone**: +977-9804853916
+- **WhatsApp**: +977-9844135708
+- **Email**: mrshailenderakumarjha@gmail.com
 - **Address**: Near Murali Chowk, Janakpurdham-8, Nepal.
 
 Would you like to leave your name and phone number so our representative can call you directly?`;
